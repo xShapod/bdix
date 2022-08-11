@@ -1,0 +1,34 @@
+[
+    {
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/xShapod/bdix",
+        "status": 3,
+        "authors": [
+            
+        ],
+        "version": -1,
+        "internalName": "CtgMovies",
+        "url": "https://raw.githubusercontent.com/xShapod/bdix/builds/CtgMovies.cs3",
+        "name": "CtgMovies"
+    },
+    {
+        "iconUrl": "https://upload.wikimedia.org/wikipedia/commons/2/2f/Korduene_Logo.png",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/xShapod/bdix",
+        "fileSize": 7311,
+        "status": 1,
+        "language": "en",
+        "authors": [
+            "Cloudburst",
+            "Luna712"
+        ],
+        "tvTypes": [
+            "Movie"
+        ],
+        "version": 1,
+        "internalName": "ExampleProvider",
+        "description": "Lorem ipsum",
+        "url": "https://raw.githubusercontent.com/xShapod/bdix/builds/ExampleProvider.cs3",
+        "name": "ExampleProvider"
+    }
+]
