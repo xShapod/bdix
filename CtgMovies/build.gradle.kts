@@ -15,6 +15,7 @@ android {
 }
 
 dependencies {
-    // No :common here — TestPlugins template doesn't use it
-    // Keep deps minimal; CloudStream APIs are provided by the template build
+    // Keep only what you actually use. Jsoup is fine.
+    implementation("org.jsoup:jsoup:1.16.1")
+    // ❌ Do NOT reference project(":common") – it doesn't exist in new template
 }
