@@ -15,5 +15,6 @@ android {
 }
 
 dependencies {
-    // No :common here either
+    implementation("org.jsoup:jsoup:1.16.1")
+    // No project(":common")
 }
