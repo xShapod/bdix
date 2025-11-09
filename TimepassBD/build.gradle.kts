@@ -11,6 +11,6 @@ android {
 }
 
 dependencies {
-    implementation(project(":common")) // CloudStream common
-    // Jsoup already comes via common; you can omit extra jsoup dependency
+    implementation(project(":common"))
+    implementation("org.jsoup:jsoup:1.16.1")
 }
