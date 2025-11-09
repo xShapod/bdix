@@ -1,21 +1,25 @@
 plugins {
     id("com.android.library")
     kotlin("android")
+    id("cloudstream") // <- use the Cloudstream Gradle plugin
 }
 
 android {
     namespace = "com.bdix.ctgmovies"
     compileSdk = 34
-
-    defaultConfig {
-        minSdk = 21
-    }
-
+    defaultConfig { minSdk = 21 }
     sourceSets["main"].manifest.srcFile("src/main/AndroidManifest.xml")
 }
 
+cloudstream {
+    language = "en"
+    description = "CTGMovies provider for BDIX-only access."
+    authors = listOf("xShapod")
+    status = 1 // 1 = working, 0 = beta, etc.
+    tvTypes = listOf("Movie", "TvSeries")
+    iconUrl = "https://www.google.com/s2/favicons?domain=ctgmovies.com&sz=128"
+}
+
 dependencies {
-    // Keep only what you actually use. Jsoup is fine.
     implementation("org.jsoup:jsoup:1.16.1")
-    // ❌ Do NOT reference project(":common") – it doesn't exist in new template
 }
