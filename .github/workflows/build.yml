@@ -1,6 +1,7 @@
 name: Build
+
 concurrency:
-  group: build
+  group: "build"
   cancel-in-progress: true
 
 on:
@@ -13,6 +14,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
@@ -26,14 +28,16 @@ jobs:
           path: builds
 
       - name: Clean old builds
-        run: rm -f "$GITHUB_WORKSPACE/builds/"*.cs3 || true
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/builds"
+          rm -f "$GITHUB_WORKSPACE/builds/"*.cs3 || true
+          rm -f "$GITHUB_WORKSPACE/builds/plugins.json" || true
 
       - name: Setup JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: 17
-          cache: gradle
+          java-version: "17"
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v2
@@ -42,9 +46,13 @@ jobs:
         run: |
           cd "$GITHUB_WORKSPACE/src"
           chmod +x gradlew
-          ./gradlew --no-daemon make makePluginsJson
-          cp **/build/*.cs3 "$GITHUB_WORKSPACE/builds" || true
-          cp build/plugins.json "$GITHUB_WORKSPACE/builds"
+          ./gradlew make makePluginsJson
+          # Copy artifacts if present (don't fail if a module didn't build)
+          shopt -s nullglob
+          for f in */build/*.cs3; do
+            cp "$f" "$GITHUB_WORKSPACE/builds"/
+          done
+          cp -f build/plugins.json "$GITHUB_WORKSPACE/builds"/ || true
 
       - name: Push builds
         run: |
@@ -52,5 +60,5 @@ jobs:
           git config user.email "actions@github.com"
           git config user.name "GitHub Actions"
           git add .
-          git commit --amend -m "Build $GITHUB_SHA" || exit 0
+          git commit --amend -m "Build $GITHUB_SHA" || echo "Nothing to commit"
           git push --force
