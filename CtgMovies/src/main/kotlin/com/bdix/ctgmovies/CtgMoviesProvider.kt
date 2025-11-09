@@ -1,11 +1,8 @@
 package com.bdix.ctgmovies
 
 import com.lagradost.cloudstream3.*
-import com.lagradost.cloudstream3.network.CloudflareKiller
 import com.lagradost.cloudstream3.utils.*
 import org.jsoup.nodes.Document
-import org.jsoup.nodes.Element
-import org.jsoup.Jsoup
 
 class CtgMoviesProvider : MainAPI() {
     override var mainUrl = "https://ctgmovies.com"
@@ -24,82 +21,125 @@ class CtgMoviesProvider : MainAPI() {
     }
 
     override suspend fun getMainPage(): HomePageResponse {
-        val res = app.get(mainUrl, client = client)
-        val doc = res.document
-        val sections = mutableListOf<HomePageList>()
+        val doc = app.get(mainUrl, client = client).document
+        val lists = mutableListOf<HomePageList>()
 
-        fun parse(selector: String, title: String) {
-            val items = doc.select(selector).mapNotNull { el -> el.toSearchResponse() }
-            if (items.isNotEmpty()) sections.add(HomePageList(title, items))
+        fun attempt(selector: String, title: String) {
+            val items = doc.select(selector).mapNotNull { it.toSearchResponse() }
+            if (items.isNotEmpty()) lists.add(HomePageList(title, items))
         }
 
-        parse(".post, .movie, .card, .entry", "Latest")
+        // Try common “card/post/grid” patterns first
+        attempt(".post, .movie, .card, .grid-item, article", "Latest")
 
-        if (sections.isEmpty()) {
+        // Fallback: any internal anchors
+        if (lists.isEmpty()) {
             val items = doc.select("a[href]")
                 .mapNotNull { it.toSearchResponse() }
-                .take(30)
-            if (items.isNotEmpty()) sections.add(HomePageList("Browse", items))
+                .distinctBy { it.url }
+                .take(40)
+            if (items.isNotEmpty()) lists.add(HomePageList("Browse", items))
         }
 
-        return newHomePageResponse(sections)
+        if (lists.isEmpty()) throw ErrorLoadingException("No content found on CTGMovies homepage.")
+        return newHomePageResponse(lists)
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
-        val doc = app.get("$mainUrl/?s=${query.encodeURL()}", client = client).document
-        return doc.select("a[href]").mapNotNull { it.toSearchResponse() }
+        // Try WordPress-like search; if not present, client-filter homepage
+        val url = "$mainUrl/?s=" + query.encodeURL()
+        val doc = app.get(url, client = client).document
+        val results = doc.select("article, .post, .movie, .result, .card")
+            .mapNotNull { it.toSearchResponse() }
+            .ifEmpty {
+                doc.select("a[href]").mapNotNull { it.toSearchResponse() }
+            }
+        return results.distinctBy { it.url }
     }
 
     override suspend fun load(url: String): LoadResponse {
         val doc = app.get(url, client = client).document
-        val title = doc.selectFirst("h1, h2, .title")?.text() ?: "Untitled"
-        val poster = doc.selectFirst("img[src]")?.absUrl("src")
-        val plot = doc.selectFirst("p")?.text()
 
-        val episodes = doc.select("a[href*=/E], a[href*=/S0]").map {
-            Episode(it.absUrl("href"), it.text())
-        }
+        val title = doc.selectFirst("meta[property=og:title]")?.attr("content")
+            ?: doc.selectFirst("h1, h2, .title, .entry-title")?.text()
+            ?: "Unknown"
 
-        return if (episodes.isNotEmpty()) {
-            newTvSeriesLoadResponse(title, url, TvType.TvSeries) {
+        val poster = doc.selectFirst("meta[property=og:image]")?.absUrl("content")
+            ?: doc.selectFirst("img[src]")?.absUrl("src")
+
+        val plot = doc.selectFirst(".desc, .summary, .plot, p")?.text()
+
+        val episodeLinks = doc.select(".episode, .episodes a, a[href*=episode], a[href*=/S], a[href*=/E]")
+            .map { it.text() to it.absUrl("href") }
+
+        return if (episodeLinks.isNotEmpty()) {
+            newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodeCount = episodeLinks.size) {
                 this.posterUrl = poster
                 this.plot = plot
-                addEpisodes(DubStatus.Subbed, episodes)
+                addEpisodes(DubStatus.Subbed, episodeLinks.mapIndexed { i, (n, h) ->
+                    Episode(h, n.ifBlank { "Episode ${i + 1}" })
+                })
             }
         } else {
+            val links = extractPlayableLinks(doc, url)
             newMovieLoadResponse(title, url, TvType.Movie) {
                 this.posterUrl = poster
                 this.plot = plot
-                addLinks(extract(doc, url))
+                addLinks(links)
             }
         }
     }
 
-    override suspend fun loadLinks(data: String, isCasting: Boolean, subtitleCallback: (SubtitleFile) -> Unit, callback: (ExtractorLink) -> Unit): Boolean {
-        val res = app.get(data, client = client).document
-        extract(res, data).forEach(callback)
-        return true
+    override suspend fun loadLinks(
+        data: String,
+        isCasting: Boolean,
+        subtitleCallback: (SubtitleFile) -> Unit,
+        callback: (ExtractorLink) -> Unit
+    ): Boolean {
+        val doc = app.get(data, client = client).document
+        val links = extractPlayableLinks(doc, data)
+        links.forEach(callback)
+        return links.isNotEmpty()
     }
 
-    private fun Element.toSearchResponse(): SearchResponse? {
-        val a = selectFirst("a[href]") ?: return null
-        val href = a.absUrl("href")
-        val title = a.text().ifBlank { href.substringAfterLast("/") }
-        return newMovieSearchResponse(title, href, TvType.Movie) {}
+    // ---------- helpers ----------
+
+    private fun org.jsoup.nodes.Element.toSearchResponse(): SearchResponse? {
+        val a = if (tagName() == "a") this else selectFirst("a[href]") ?: return null
+        val href = a.absUrl("href").ifBlank { return null }
+        val title = selectFirst(".title, h2, h3, h1")?.text()
+            ?: a.attr("title").ifBlank { a.text() }
+            ?: "Untitled"
+        val poster = selectFirst("img[src]")?.absUrl("src")
+        return newMovieSearchResponse(title, href, TvType.Movie) {
+            this.posterUrl = poster
+        }
     }
 
-    private fun extract(doc: Document, ref: String): List<ExtractorLink> {
-        return doc.select("a[href$=.mp4], a[href$=.mkv], a[href$=.m3u8], source[src], iframe[src]")
+    private fun extractPlayableLinks(doc: Document, pageUrl: String): List<ExtractorLink> {
+        val media = doc.select("a[href$=.mp4], a[href$=.mkv], a[href$=.webm], a[href$=.m3u8]")
             .map { it.absUrl("href") }
-            .distinct()
-            .map {
-                ExtractorLink(name, name, it, ref, qualityFromName(it), it.endsWith(".m3u8"))
-            }
+        val video = doc.select("video source[src], source[src]").map { it.absUrl("src") }
+        val iframes = doc.select("iframe[src]").map { it.absUrl("src") }
+        val urls = (media + video + iframes).distinct()
+        return urls.map { toExtractorLink(it, pageUrl) }
     }
 
-    private fun qualityFromName(url: String) = when {
-        url.contains("1080", true) -> Qualities.P1080.value
-        url.contains("720", true) -> Qualities.P720.value
-        else -> Qualities.Unknown.value
+    private fun toExtractorLink(url: String, referer: String): ExtractorLink {
+        val quality = when {
+            url.contains("2160", true) -> Qualities.P2160.value
+            url.contains("1080", true) -> Qualities.P1080.value
+            url.contains("720", true)  -> Qualities.P720.value
+            url.contains("480", true)  -> Qualities.P480.value
+            else -> Qualities.Unknown.value
+        }
+        return ExtractorLink(
+            source = name,
+            name = name,
+            url = url,
+            referer = referer,
+            quality = quality,
+            isM3u8 = url.endsWith(".m3u8", true)
+        )
     }
 }
